@@ -12,4 +12,6 @@ This is a simple dashboard to visualize crimes in Chicago's rapid transit system
 3. Do `uv run streamlit run ./app.py`.
 
 ## Instructions (Production)
-1. View the dashboard at https://chicagotransitcrime.streamlit.app/.
+View the dashboard at https://chicagotransitcrime.streamlit.app/:
+
+![](./images/example.png)
