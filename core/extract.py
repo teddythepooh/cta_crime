@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 class CTACrime:
     base_url = "data.cityofchicago.org"
     crimes = "ijzp-q8t2"
-    train_stations = "3tzw-cg4m"
+    rail_stations = "3tzw-cg4m"
+    rail_lines = "xbyr-jnvx"
     
     def __init__(self, 
                  api_key_id: str = os.environ["socrata_username"],
@@ -91,7 +92,12 @@ class CTACrime:
         
         return pl.DataFrame(response)
     
-    def cta_train_coordinates(self) -> pl.DataFrame:
-        response = self.client.get(CTACrime.train_stations)
+    def cta_rail_stations(self) -> pl.DataFrame:
+        response = self.client.get(CTACrime.rail_stations)
+        
+        return pl.DataFrame(response)
+    
+    def cta_rail_lines(self) -> pl.DataFrame:
+        response = self.client.get(CTACrime.rail_lines)
         
         return pl.DataFrame(response)

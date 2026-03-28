@@ -11,9 +11,9 @@ st.set_page_config(
 
 st.title("\U0001F687 CTA Crimes")
 st.markdown(
-    "Crimes in or along Chicago's train system up to the last 30 days (refreshed daily). Select crime type(s) and "
-    "date range on the sidebar. The Chicago Police Department does not make incidents from the last seven days "
-    "publicly available, hence this dashboard is delayed by a week."
+    "Crimes in Chicago's rapid transit system in the last 30 days available (refreshed daily). Select crime type(s) and "
+    "date range on the sidebar. The Chicago Police Department (CPD) partially redacts crime locations, so there is  "
+    "some degree of imprecision. Each solid black dot denotes an incident of crime."
 )
 
 LINE_COLORS = {
@@ -28,11 +28,14 @@ LINE_COLORS = {
     "Multiple": "#FFFFFF",
 }
 
-
+client = CTACrime(
+    api_key_id = st.secrets["socrata_username"],
+    api_key_secret = st.secrets["socrata_password"],
+    token = st.secrets["socrata_app_token"]
+)
 
 @st.cache_data(ttl = 3600 * 24, show_spinner = "Fetching CTA crime data\u2026")
-def load_crimes() -> pl.DataFrame:
-    client = CTACrime()
+def load_crimes(client: CTACrime = client) -> pl.DataFrame:
     df = client.get_cta_crimes(last_n_days = 30)
 
     df = df.with_columns(
@@ -40,23 +43,43 @@ def load_crimes() -> pl.DataFrame:
         pl.col("longitude").cast(pl.Float64),
         pl.col("latitude").cast(pl.Float64),
     )
-    
+
     return df
 
 @st.cache_data(ttl = 3600 * 24 * 365, show_spinner = "Fetching CTA station locations\u2026")
-def load_stations() -> pl.DataFrame:
-    client = CTACrime()
-    df = client.cta_train_coordinates()
+def load_stations(client: CTACrime = client) -> pl.DataFrame:
+    df = client.cta_rail_stations()
 
     df = df.with_columns(
         pl.col("the_geom").struct.field("coordinates").list.get(0).alias("lon"),
         pl.col("the_geom").struct.field("coordinates").list.get(1).alias("lat"),
     )
-    
+
     return df
+
+@st.cache_data(ttl = 3600 * 24 * 365, show_spinner = "Fetching CTA rail lines\u2026")
+def load_rail_lines(client: CTACrime = client) -> dict:
+    df = client.cta_rail_lines()
+
+    features = []
+    for geom in df["the_geom"].to_list():
+        if geom is None:
+            continue
+        coords = geom.get("coordinates", []) if isinstance(geom, dict) else []
+        if coords:
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "MultiLineString",
+                    "coordinates": coords,
+                },
+            })
+
+    return {"type": "FeatureCollection", "features": features}
 
 crimes_df = load_crimes()
 stations_df = load_stations()
+rail_lines_geojson = load_rail_lines()
 
 crime_types = sorted(crimes_df["primary_type"].unique().to_list())
 
@@ -105,15 +128,13 @@ valid_stations = stations_df.filter(
     & (pl.col("legend") != "")
 )
 
-
-    
 for line_name, color in LINE_COLORS.items():
     subset = valid_stations.filter(
         pl.col("legend").str.contains(f"{line_name}")
     )
     if len(subset) == 0:
         continue
-    
+
     if line_name == "Multiple":
         fig.add_trace(
             go.Scattermapbox(
@@ -125,19 +146,22 @@ for line_name, color in LINE_COLORS.items():
                 hoverinfo = "none",
             )
         )
-        
+
     fig.add_trace(
         go.Scattermapbox(
             lat = subset["lat"].to_list(),
             lon = subset["lon"].to_list(),
-            mode = "markers",
+            mode = "markers+text",
             marker = dict(size = 9, color = color, opacity = 0.9),
+            text = subset["longname"].to_list(),
+            textfont = dict(size = 9),
+            textposition = "top center",
             name = f"{line_name} {'Lines' if line_name == 'Multiple' else 'Line'}",
             hovertext = subset["longname"].to_list(),
             hoverinfo = "text",
         )
     )
-    
+
 if len(filtered) > 0:
     fig.add_trace(
         go.Scattermapbox(
@@ -146,7 +170,7 @@ if len(filtered) > 0:
             mode = "markers",
             marker = dict(
                 size = 10,
-                color = "black"
+                color = "black",
             ),
             name = "Crimes",
             hovertext = [
@@ -159,9 +183,25 @@ if len(filtered) > 0:
 
 fig.update_layout(
     mapbox = dict(
-        style = "carto-positron",
+        style = "white-bg",
         center = dict(lat = 41.8781, lon = -87.6298),
         zoom = 10.5,
+        layers = [
+            dict(
+                below = "traces",
+                sourcetype = "raster",
+                sourceattribution = "\u00a9 OpenStreetMap contributors, \u00a9 CARTO",
+                source = ["https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png"],
+            ),
+            dict(
+                below = "traces",
+                sourcetype = "geojson",
+                source = rail_lines_geojson,
+                type = "line",
+                color = "grey",
+                line = dict(width = 2, dash = [4, 2]),
+            ),
+        ],
     ),
     margin = dict(l = 0, r = 0, t = 0, b = 0),
     height = 650,
