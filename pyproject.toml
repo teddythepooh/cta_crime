@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["core"]
+
+[project]
+name = "cta-crime"
+version = "0.1.0"
+description = "Simple dashboard to visualize crimes in Chicago's train system."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "plotly==6.6.0",
+    "polars==1.39.3",
+    "pyarrow==23.0.1",
+    "python-dotenv==1.2.2",
+    "sodapy==2.2.0",
+    "streamlit==1.55.0",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.2.0",
+]
