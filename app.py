@@ -1,6 +1,8 @@
 import streamlit as st
 import polars as pl
 import plotly.graph_objects as go
+import math
+from geopy.geocoders import Nominatim
 from core import CTACrime
 
 st.set_page_config(
@@ -142,6 +144,26 @@ if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
     start_date, end_date = date_range
 else:
     start_date, end_date = min_date, max_date
+    
+address_street = st.sidebar.text_input(
+    "Enter your street number and name below to pin it in the map (a purple dot) for reference.",
+    placeholder = "190 S LaSalle St",
+)
+st.sidebar.text_input("City", value = "Chicago", disabled = True)
+st.sidebar.text_input("State", value = "Illinois", disabled = True)
+
+searched_location = None
+if address_street:
+    full_address = f"{address_street}, Chicago, Illinois"
+    geolocator = Nominatim(user_agent = "cta-crimes-dashboard")
+    try:
+        location = geolocator.geocode(full_address, timeout = 5)
+        if location:
+            searched_location = {"lat": location.latitude, "lon": location.longitude, "label": location.address}
+        else:
+            st.sidebar.warning("Address not found.")
+    except Exception:
+        st.sidebar.warning("Geocoding failed. Try again.")
 
 filtered = crimes_df.filter(
     pl.col("primary_type").is_in(selected_types)
@@ -232,11 +254,52 @@ if len(filtered) > 0:
             hoverinfo = "text",
         )
     )
+    
+if searched_location:
+    def make_circle(lat, lon, radius_miles = 1, n_points = 64):
+        radius_km = radius_miles * 1.60934
+        lats, lons = [], []
+        for i in range(n_points + 1):
+            angle = math.radians(360 * i / n_points)
+            dlat = (radius_km / 111.32) * math.cos(angle)
+            dlon = (radius_km / (111.32 * math.cos(math.radians(lat)))) * math.sin(angle)
+            lats.append(lat + dlat)
+            lons.append(lon + dlon)
+        return lats, lons
+
+    circle_lats, circle_lons = make_circle(searched_location["lat"], searched_location["lon"])
+
+    fig.add_trace(
+        go.Scattermapbox(
+            lat = circle_lats,
+            lon = circle_lons,
+            mode = "lines",
+            line = dict(width = 3, color = "purple"),
+            fill = "toself",
+            fillcolor = "rgba(128, 0, 128, 0.15)",
+            name = "One-Mile Radius",
+            hoverinfo = "skip",
+        )
+    )
+
+    fig.add_trace(
+        go.Scattermapbox(
+            lat = [searched_location["lat"]],
+            lon = [searched_location["lon"]],
+            mode = "markers",
+            marker = dict(size = 10, color = "purple"),
+            name = "Your Address",
+            hoverinfo = "skip",
+        )
+    )
 
 fig.update_layout(
     mapbox = dict(
         style = "white-bg",
-        center = dict(lat = 41.8781, lon = -87.6298),
+        center = (
+            dict(lat = searched_location["lat"], lon = searched_location["lon"]) if searched_location
+            else dict(lat = 41.8781, lon = -87.6298)
+        ),
         zoom = 10.5,
         layers = [
             dict(
