@@ -69,7 +69,7 @@ def load_rail_lines(client: CTACrime = client) -> dict:
 
     return {"type": "FeatureCollection", "features": features}
 
-@st.cache_data(ttl=3600 * 24 * 365, show_spinner="Fetching community areas…")
+@st.cache_data(ttl = 3600 * 24 * 365, show_spinner = "Fetching community areas\u2026")
 def load_community_areas(client: CTACrime = client) -> tuple:
     df = client.chicago_community_areas()
 
@@ -165,7 +165,6 @@ valid_stations = stations_df.filter(
     & (pl.col("legend") != "")
 )
 
-    
 fig.add_trace(
     go.Choroplethmapbox(
         geojson = community_geojson,
