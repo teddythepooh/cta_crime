@@ -8,6 +8,7 @@ class CTACrime:
     crimes = "ijzp-q8t2"
     rail_stations = "3tzw-cg4m"
     rail_lines = "xbyr-jnvx"
+    community_areas = "igwz-8jzy"
     
     def __init__(self, 
                  api_key_id: str = os.environ["socrata_username"],
@@ -41,8 +42,12 @@ class CTACrime:
                 )
 
     def _all_columns(self) -> set:
-        return set(self.get_schema().keys())
-    
+        columns = self.get_schema().keys()
+        
+        columns_normalized = {col.replace(" ", "_").lower() for col in columns}
+        
+        return columns_normalized
+
     @staticmethod
     def _cta_locations():
         return [
@@ -62,7 +67,7 @@ class CTACrime:
         
         return pl.DataFrame(response)
     
-    def get_max_date(self, date_column: str = "Date") -> str:
+    def get_max_date(self, date_column: str = "date") -> str:
         if date_column not in self._all_columns():
             raise Exception(f"Date column '{date_column}' not found. Do get_schema() for to get all columns.")
         
@@ -84,13 +89,26 @@ class CTACrime:
         cta_locations = ", ".join(f"'{loc}'" for loc in CTACrime._cta_locations())
         
         query = f"""
-        SELECT case_number, date, primary_type, location_description, longitude, latitude
+        SELECT case_number, 
+               date,
+               primary_type, 
+               location_description, 
+               longitude, 
+               latitude
         WHERE date >= '{start_date}' AND location_description IN ({cta_locations})
         """
-        
+
         response = self.run_query(query = query)
         
-        return pl.DataFrame(response)
+        date_format = r"%Y-%m-%dT%H:%M:%S%.f"
+        df = (pl.DataFrame(response)
+            .with_columns(
+                pl.col("date").str.to_date(date_format),
+                pl.col("longitude").cast(pl.Float64),
+                pl.col("latitude").cast(pl.Float64),)
+        )
+
+        return pl.DataFrame(df)
     
     def cta_rail_stations(self) -> pl.DataFrame:
         response = self.client.get(CTACrime.rail_stations)
@@ -99,5 +117,10 @@ class CTACrime:
     
     def cta_rail_lines(self) -> pl.DataFrame:
         response = self.client.get(CTACrime.rail_lines)
+        
+        return pl.DataFrame(response)
+    
+    def chicago_community_areas(self) -> pl.DataFrame:
+        response = self.client.get(CTACrime.community_areas)
         
         return pl.DataFrame(response)

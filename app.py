@@ -36,15 +36,7 @@ client = CTACrime(
 
 @st.cache_data(ttl = 3600 * 24, show_spinner = "Fetching CTA crime data\u2026")
 def load_crimes(client: CTACrime = client) -> pl.DataFrame:
-    df = client.get_cta_crimes(last_n_days = 30)
-
-    df = df.with_columns(
-        pl.col("date").str.to_datetime().alias("date"),
-        pl.col("longitude").cast(pl.Float64),
-        pl.col("latitude").cast(pl.Float64),
-    )
-
-    return df
+    return client.get_cta_crimes(last_n_days = 30)
 
 @st.cache_data(ttl = 3600 * 24 * 365, show_spinner = "Fetching CTA station locations\u2026")
 def load_stations(client: CTACrime = client) -> pl.DataFrame:
@@ -77,9 +69,54 @@ def load_rail_lines(client: CTACrime = client) -> dict:
 
     return {"type": "FeatureCollection", "features": features}
 
+@st.cache_data(ttl=3600 * 24 * 365, show_spinner="Fetching community areas…")
+def load_community_areas(client: CTACrime = client) -> tuple:
+    df = client.chicago_community_areas()
+
+    features = []
+    centroids = []
+
+    for row in df.iter_rows(named = True):
+        geom = row["the_geom"]
+        name = row["community"]
+
+        if geom is None:
+            continue
+
+        coords = geom.get("coordinates", []) if isinstance(geom, dict) else []
+        geom_type = geom.get("type", "MultiPolygon") if isinstance(geom, dict) else "MultiPolygon"
+
+        if not coords:
+            continue
+
+        features.append({
+            "type": "Feature",
+            "properties": {"name": name},
+            "geometry": {"type": geom_type, "coordinates": coords},
+        })
+
+        all_lats, all_lons = [], []
+        for polygon in coords:
+            for ring in polygon:
+                for lon, lat in ring:
+                    all_lons.append(lon)
+                    all_lats.append(lat)
+
+        if all_lats:
+            centroids.append({
+                "community": name.title(),
+                "lat": sum(all_lats) / len(all_lats),
+                "lon": sum(all_lons) / len(all_lons),
+            })
+
+    geojson = {"type": "FeatureCollection", "features": features}
+    centroids_df = pl.DataFrame(centroids)
+    return geojson, centroids_df
+
 crimes_df = load_crimes()
 stations_df = load_stations()
 rail_lines_geojson = load_rail_lines()
+community_geojson, community_centroids = load_community_areas()
 
 crime_types = sorted(crimes_df["primary_type"].unique().to_list())
 
@@ -91,8 +128,8 @@ selected_types = st.sidebar.multiselect(
     default = [],
 )
 
-min_date = crimes_df["date"].min().date()
-max_date = crimes_df["date"].max().date()
+min_date = crimes_df["date"].min()
+max_date = crimes_df["date"].max()
 
 date_range = st.sidebar.date_input(
     "Date Range",
@@ -108,8 +145,8 @@ else:
 
 filtered = crimes_df.filter(
     pl.col("primary_type").is_in(selected_types)
-    & (pl.col("date").dt.date() >= start_date)
-    & (pl.col("date").dt.date() <= end_date)
+    & (pl.col("date") >= start_date)
+    & (pl.col("date") <= end_date)
 )
 
 col1, col2 = st.columns(2)
@@ -126,6 +163,22 @@ valid_stations = stations_df.filter(
     & pl.col("lon").is_not_null()
     & pl.col("legend").is_not_null()
     & (pl.col("legend") != "")
+)
+
+    
+fig.add_trace(
+    go.Choroplethmapbox(
+        geojson = community_geojson,
+        locations = [f["properties"]["name"] for f in community_geojson["features"]],
+        featureidkey = "properties.name",
+        z = [1] * len(community_geojson["features"]),
+        colorscale = [[0, "rgba(180, 180, 180, 0.25)"], [1, "rgba(180, 180, 180, 0.25)"]],
+        marker = dict(line = dict(width = 1, color = "rgba(100, 100, 100, 0.5)")),
+        hovertext = [f["properties"]["name"].title() for f in community_geojson["features"]],
+        hoverinfo = "text",
+        showscale = False,
+        showlegend = False,
+    )
 )
 
 for line_name, color in LINE_COLORS.items():
@@ -174,7 +227,7 @@ if len(filtered) > 0:
             ),
             name = "Crimes",
             hovertext = [
-                f"{row['primary_type']}<br>{row['date']:%Y-%m-%d %H:%M}<br>{row['location_description']}"
+                f"{row['primary_type']}<br>{row['date']}<br>{row['location_description']}"
                 for row in filtered.iter_rows(named = True)
             ],
             hoverinfo = "text",
